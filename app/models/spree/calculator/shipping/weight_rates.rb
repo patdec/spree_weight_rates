@@ -1,7 +1,7 @@
 module Spree
   module Calculator::Shipping
     class WeightRates < ShippingCalculator
-      preference :costs_string, :text, default: "1:5\n2:7\n5:10\n10:15\n100:50"
+      preference :costs_string, :text, default: "1:5-100\n2:7-200\n5:10-300\n10:15-400\n100:50-500"
       preference :default_weight, :decimal, default: 1
       preference :upcharge, :decimal, default: 0
       preference :only_integers, :boolean, default: true
@@ -25,7 +25,7 @@ module Spree
         content_items = package.contents
 
         # Total cart weight
-        total_weight  = total_weight(content_items)
+        total_weight = total_weight(content_items)
 
         # Costs table
         costs = costs_string_to_hash(clean_costs_string)
@@ -34,7 +34,7 @@ module Spree
         weight_class = costs.keys.select { |w| total_weight <= w }.min || costs.keys.max
 
         # Price
-        base_shipping_cost = costs[weight_class]
+        base_shipping_cost = costs[weight_class][:price]
 
         # Fee per additional kilo
         upcharge_amount = 0
@@ -46,45 +46,57 @@ module Spree
           extra_weight = extra_weight.ceil if preferred_only_integers
 
           upcharge_amount = preferred_upcharge * extra_weight
+        #Free shipping cost
+        elsif costs[weight_class][:minimum_amount] and total(content_items) > costs[weight_class][:minimum_amount]
+          base_shipping_cost = 0
         end
-
         return base_shipping_cost + upcharge_amount
       end
 
       private
-        def clean_costs_string
-          preferred_costs_string.strip
-        end
+      def clean_costs_string
+        preferred_costs_string.strip
+      end
 
-        def costs_string_valid?
-          !clean_costs_string.empty? &&
-          clean_costs_string.count(':') > 0 &&
-          clean_costs_string.split(/\:|\n/).size.even? &&
-          clean_costs_string.split(/\:|\n/).all? { |s | s.strip.match(/^\d|\.+$/) }
-        end
+      def costs_string_valid?
+        !clean_costs_string.empty? &&
+            clean_costs_string.count(':') > 0 &&
+            clean_costs_string.split(/\:|\n/).size.even? &&
+            clean_costs_string.split(/\:|\n|\-/).all? { |s| s.strip.match(/^\d|\.+$/) }
+      end
 
-        def costs_string_to_hash(costs_string)
-          costs = {}
+      def costs_string_to_hash(costs_string)
+        costs = {}
 
-          costs_string.split.each do |cost_string|
-            values = cost_string.strip.split(':')
-            costs[values[0].strip.to_f] = values[1].strip.to_f
+        costs_string.split.each do |cost_string|
+          values = cost_string.strip.split(':')
+          if values[1].count('-') > 0
+            price = values[1].split('-')[0].strip.to_f
+            minimum_amount = values[1].split('-')[1].strip.to_f
+          else
+            price = values[1].strip.to_f
+            minimum_amount = nil
           end
-
-          costs
+          costs[values[0].strip.to_f] = {
+              price: price,
+              minimum_amount: minimum_amount
+          }
         end
 
-        def total_weight(contents)
-          weight = 0
+        costs
+      end
 
-          # Compute weight for each cart item
-          contents.each do |item|
-            item_weight = item.variant.weight > 0.0 ? item.variant.weight : preferred_default_weight
-            weight += item.quantity * item_weight
-          end
+      def total_weight(contents)
+        weight = 0
 
-          weight
+        # Compute weight for each cart item
+        contents.each do |item|
+          item_weight = item.variant.weight > 0.0 ? item.variant.weight : preferred_default_weight
+          weight += item.quantity * item_weight
         end
+
+        weight
+      end
     end
   end
 end
